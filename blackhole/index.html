@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>奇点 · 网页黑洞 / Schwarzschild Black Hole</title>
+<meta name="description" content="基于广义相对论光线测地线积分的实时黑洞渲染器 · WebGL2">
+<meta name="theme-color" content="#05060a">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<canvas id="gl"></canvas>
+
+<!-- ============ 品牌标题 ============ -->
+<div class="brand" id="brand">
+  <h1>奇 点<span>SINGULARITY</span></h1>
+  <p>史瓦西黑洞 · 实时光线测地线积分</p>
+</div>
+
+<!-- ============ 控制面板 ============ -->
+<aside id="panel">
+  <header class="p-head">
+    <span class="dot"></span>
+    <b>控制台</b>
+    <button class="icon" id="btnCollapse" title="折叠 / 展开">—</button>
+  </header>
+
+  <div class="p-body" id="panelBody">
+
+    <section>
+      <h2>视角</h2>
+      <div class="row"><label>轨道距离</label><span data-out="dist"></span></div>
+      <input type="range" data-param="dist" data-digits="1" data-suffix=" rs" min="3.5" max="70" step="0.1" value="26">
+
+      <div class="row"><label>倾角</label><span data-out="pitch"></span></div>
+      <input type="range" data-param="pitch" data-digits="1" data-suffix="°" min="-88" max="88" step="0.5" value="7">
+
+      <div class="row"><label>视场角</label><span data-out="fov"></span></div>
+      <input type="range" data-param="fov" data-digits="0" data-suffix="°" min="15" max="90" step="1" value="40">
+
+      <div class="row"><label>自动环绕</label><span data-out="autorot"></span></div>
+      <input type="checkbox" data-param="autorot" checked>
+
+      <div class="row"><label>环绕速度</label><span data-out="rotspeed"></span></div>
+      <input type="range" data-param="rotspeed" data-digits="2" min="-1.5" max="1.5" step="0.01" value="0.14">
+
+      <div class="row"><label>时间流速</label><span data-out="timescale"></span></div>
+      <input type="range" data-param="timescale" data-digits="2" min="0" max="4" step="0.01" value="1">
+    </section>
+
+    <section>
+      <h2>吸积盘</h2>
+      <div class="row"><label>内缘半径</label><span data-out="diskIn"></span></div>
+      <input type="range" data-param="diskIn" data-digits="2" data-suffix=" rs" min="1.5" max="10" step="0.01" value="3">
+
+      <div class="row"><label>外缘半径</label><span data-out="diskOut"></span></div>
+      <input type="range" data-param="diskOut" data-digits="1" data-suffix=" rs" min="5" max="45" step="0.1" value="15">
+
+      <div class="row"><label>亮度</label><span data-out="diskBright"></span></div>
+      <input type="range" data-param="diskBright" data-digits="2" min="0" max="3" step="0.01" value="1">
+
+      <div class="row"><label>密度</label><span data-out="diskDens"></span></div>
+      <input type="range" data-param="diskDens" data-digits="2" min="0" max="3" step="0.01" value="1">
+
+      <div class="row"><label>厚度</label><span data-out="diskThick"></span></div>
+      <input type="range" data-param="diskThick" data-digits="2" min="0.02" max="2" step="0.01" value="0.55">
+
+      <div class="row"><label>内缘温度</label><span data-out="diskTemp"></span></div>
+      <input type="range" data-param="diskTemp" data-digits="0" data-suffix=" K" min="2500" max="24000" step="100" value="11500">
+
+      <div class="row"><label>转速</label><span data-out="spin"></span></div>
+      <input type="range" data-param="spin" data-digits="2" min="0" max="2" step="0.01" value="1">
+    </section>
+
+    <section>
+      <h2>相对论效应</h2>
+      <div class="row"><label>引力透镜</label><span data-out="lens"></span></div>
+      <input type="checkbox" data-param="lens" checked>
+
+      <div class="row"><label>多普勒集束</label><span data-out="doppler"></span></div>
+      <input type="range" data-param="doppler" data-digits="2" min="0" max="1" step="0.01" value="1">
+
+      <div class="row"><label>引力红移</label><span data-out="grav"></span></div>
+      <input type="range" data-param="grav" data-digits="2" min="0" max="1" step="0.01" value="1">
+      <p class="note">关闭引力透镜即为“平直时空”对照组。</p>
+    </section>
+
+    <section>
+      <h2>背景星空</h2>
+      <div class="row"><label>恒星亮度</label><span data-out="starB"></span></div>
+      <input type="range" data-param="starB" data-digits="2" min="0" max="3" step="0.01" value="1">
+
+      <div class="row"><label>星云亮度</label><span data-out="nebB"></span></div>
+      <input type="range" data-param="nebB" data-digits="2" min="0" max="2" step="0.01" value="0.55">
+    </section>
+
+    <section>
+      <h2>成像</h2>
+      <div class="row"><label>曝光</label><span data-out="exposure"></span></div>
+      <input type="range" data-param="exposure" data-digits="2" min="0.1" max="4" step="0.01" value="0.95">
+
+      <div class="row"><label>泛光强度</label><span data-out="bloom"></span></div>
+      <input type="range" data-param="bloom" data-digits="2" min="0" max="2.5" step="0.01" value="0.7">
+
+      <div class="row"><label>泛光阈值</label><span data-out="bloomThr"></span></div>
+      <input type="range" data-param="bloomThr" data-digits="2" min="0" max="3" step="0.01" value="1">
+
+      <div class="row"><label>色散</label><span data-out="ca"></span></div>
+      <input type="range" data-param="ca" data-digits="2" min="0" max="3" step="0.01" value="0.45">
+
+      <div class="row"><label>暗角</label><span data-out="vig"></span></div>
+      <input type="range" data-param="vig" data-digits="2" min="0" max="1.5" step="0.01" value="0.5">
+
+      <div class="row"><label>颗粒</label><span data-out="grain"></span></div>
+      <input type="range" data-param="grain" data-digits="2" min="0" max="1" step="0.01" value="0.25">
+    </section>
+
+    <section>
+      <h2>性能</h2>
+      <div class="row"><label>积分步数</label><span data-out="steps"></span></div>
+      <select data-param="steps" data-digits="0">
+        <option value="180">低 · 180</option>
+        <option value="320" selected>中 · 320</option>
+        <option value="520">高 · 520</option>
+        <option value="820">极致 · 820</option>
+      </select>
+
+      <div class="row"><label>渲染倍率</label><span data-out="scale"></span></div>
+      <input type="range" data-param="scale" data-digits="2" min="0.4" max="1" step="0.01" value="0.9">
+
+      <div class="row"><label>自适应画质</label><span data-out="adaptive"></span></div>
+      <input type="checkbox" data-param="adaptive" checked>
+      <p class="note">静止且暂停时会逐帧累积采样，自动消除锯齿。</p>
+    </section>
+
+    <section>
+      <h2>预设</h2>
+      <div class="btns">
+        <button data-preset="interstellar">星际穿越</button>
+        <button data-preset="edge">侧向掠射</button>
+        <button data-preset="top">俯视全景</button>
+        <button data-preset="pure">纯净透镜</button>
+        <button data-preset="inferno">炼狱</button>
+        <button data-preset="flat">平直时空</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>操作</h2>
+      <div class="btns">
+        <button id="btnProbe">抛出探针</button>
+        <button id="btnPause">暂停</button>
+        <button id="btnShot">截图</button>
+        <button id="btnReset">重置</button>
+        <button id="btnFull">全屏</button>
+        <button id="btnDevour" class="danger">吞噬界面</button>
+      </div>
+    </section>
+
+  </div>
+</aside>
+
+<!-- ============ HUD ============ -->
+<div id="hud">
+  <div><i>FPS</i><b id="hFps">--</b></div>
+  <div><i>分辨率</i><b id="hRes">--</b></div>
+  <div><i>累积</i><b id="hAcc">1×</b></div>
+  <div><i>探针</i><b id="hProbe">0</b></div>
+  <div class="sep"></div>
+  <div><i>事件视界</i><b>r = 1.00 r<sub>s</sub></b></div>
+  <div><i>光子球</i><b>r = 1.50 r<sub>s</sub></b></div>
+  <div><i>最内稳定圆轨道</i><b>r = 3.00 r<sub>s</sub></b></div>
+  <div><i>临界撞击参数</i><b>b = 2.598 r<sub>s</sub></b></div>
+</div>
+
+<div id="hint">拖拽 = 环绕 · 滚轮 = 缩放 · 双击 = 抛探针 · <kbd>H</kbd> 隐藏界面 · <kbd>空格</kbd> 暂停 · <kbd>S</kbd> 截图</div>
+
+<button id="restore" hidden title="召回界面">↺</button>
+
+<!-- ============ 开场 ============ -->
+<div id="intro">
+  <div class="ring"></div>
+  <h2>正在积分零测地线…</h2>
+  <p>WebGL2 · Schwarzschild Metric</p>
+</div>
+
+<!-- ============ 错误 ============ -->
+<div id="fatal" hidden>
+  <h2>无法启动渲染器</h2>
+  <pre id="fatalMsg"></pre>
+  <p>请使用支持 WebGL2 的浏览器（Chrome / Edge / Firefox 新版本），并确认已启用硬件加速。</p>
+</div>
+
+<script src="blackhole.js"></script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+# Node
+node_modules/
+npm-debug.log*
+pnpm-debug.log*
+
+# 构建产物
+dist/
+build/
+out/
+
+# 系统
+Thumbs.db
+Desktop.ini
+.DS_Store
+$RECYCLE.BIN/
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+
+# 本地部署与调试临时文件（下划线前缀约定）
+_deploy/
+_*.json
+_*.png
+_*.html
+_*.txt
+_verifytmp*

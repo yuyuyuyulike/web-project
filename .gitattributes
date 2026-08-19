@@ -1,0 +1,10 @@
+# 文本统一 LF 入库，工作区保持本机换行
+* text=auto
+*.html text
+*.css  text
+*.js   text
+*.md   text
+*.json text
+*.svg  text
+*.png  binary
+*.cmd  text eol=crlf
