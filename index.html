@@ -2,36 +2,111 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>奇点 · 网页黑洞</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>网页实验室 · web-project</title>
+<meta name="description" content="纯前端网页实验：WebGL2 实时黑洞渲染器、Canvas 2D 恐龙生存模拟器。零依赖，打开即玩。">
 <meta name="theme-color" content="#05060a">
+<meta name="color-scheme" content="dark">
 <link rel="icon" href="blackhole/favicon.svg" type="image/svg+xml">
-<meta http-equiv="refresh" content="2;url=blackhole/">
 <style>
   *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
   body{
-    margin:0;min-height:100vh;background:#05060a;color:#e7eaf0;
+    min-height:100vh;background:#05060a;color:#e7eaf0;
     font:400 15px/1.7 "Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
-    display:grid;place-items:center;
-    background-image:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(255,177,81,.10),transparent 70%);
+    background-image:
+      radial-gradient(ellipse 70% 45% at 22% -8%,rgba(255,177,81,.13),transparent 70%),
+      radial-gradient(ellipse 65% 45% at 82% 108%,rgba(120,220,140,.10),transparent 70%);
+    -webkit-font-smoothing:antialiased;
   }
-  .card{
-    display:block;text-decoration:none;color:inherit;text-align:center;
-    padding:44px 54px;border-radius:18px;
-    background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.09);
+  main{
+    max-width:1000px;margin:0 auto;
+    padding:calc(52px + env(safe-area-inset-top,0px)) calc(20px + env(safe-area-inset-right,0px))
+            calc(38px + env(safe-area-inset-bottom,0px)) calc(20px + env(safe-area-inset-left,0px));
   }
-  .card h1{
-    margin:0;font-size:24px;font-weight:200;letter-spacing:.24em;
-    background:linear-gradient(100deg,#fff 10%,#ffb151 55%,#ff6a3d 95%);
+  header{text-align:center;margin-bottom:34px}
+  header h1{
+    margin:0;font-size:clamp(26px,6.4vw,40px);font-weight:200;letter-spacing:.26em;
+    background:linear-gradient(100deg,#fff 8%,#ffb151 52%,#ff6a3d 96%);
     -webkit-background-clip:text;background-clip:text;color:transparent;
   }
-  .card p{margin:14px 0 0;color:#8c93a1;font-size:13px;letter-spacing:.1em}
+  header p{margin:12px 0 0;color:#8c93a1;font-size:12.5px;letter-spacing:.2em}
+  .grid{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+  .card{
+    position:relative;display:flex;flex-direction:column;gap:14px;
+    padding:24px 22px 20px;border-radius:18px;text-decoration:none;color:inherit;
+    background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.09);
+    transition:transform .22s ease,border-color .22s ease,background .22s ease,box-shadow .22s ease;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .card:hover,.card:focus-visible{
+    transform:translateY(-4px);background:rgba(255,255,255,.06);
+    border-color:rgba(255,255,255,.22);box-shadow:0 18px 44px rgba(0,0,0,.45);outline:none;
+  }
+  .card:active{transform:translateY(-1px) scale(.995)}
+  .top{display:flex;align-items:center;gap:14px}
+  .top img{width:52px;height:52px;border-radius:13px;flex:0 0 auto;background:rgba(255,255,255,.04)}
+  .card h2{
+    margin:0;font-size:17px;font-weight:500;letter-spacing:.06em;line-height:1.45;
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  .bh h2{background:linear-gradient(100deg,#fff 10%,#ffb151 58%,#ff6a3d 98%)}
+  .dino h2{background:linear-gradient(100deg,#fff 10%,#9fe6a5 52%,#ffce54 98%)}
+  .card p{margin:0;color:#98a0ad;font-size:13.2px}
+  .tags{display:flex;flex-wrap:wrap;gap:6px}
+  .tags i{
+    font-style:normal;font-size:11px;letter-spacing:.08em;color:#aeb6c2;
+    padding:3px 9px;border-radius:20px;background:rgba(255,255,255,.06);
+    border:1px solid rgba(255,255,255,.08);
+  }
+  .go{
+    margin-top:auto;font-size:12.5px;letter-spacing:.14em;color:#6f7684
+  }
+  .bh .go{color:#ffb151}
+  .dino .go{color:#9fe6a5}
+  footer{
+    margin-top:34px;text-align:center;color:#5f6673;font-size:11.5px;letter-spacing:.1em;
+  }
+  footer a{color:#8c93a1;text-decoration:none;border-bottom:1px solid rgba(140,147,161,.35)}
+  footer a:hover{color:#e7eaf0}
+  @media (max-width:520px){
+    main{padding-top:calc(34px + env(safe-area-inset-top,0px))}
+    header{margin-bottom:24px}
+    .card{padding:20px 18px 18px}
+    .top img{width:46px;height:46px}
+  }
 </style>
 </head>
 <body>
-<a class="card" href="blackhole/">
-  <h1>奇点 · 网页黑洞</h1>
-  <p>2 秒后自动进入 · 若未跳转请点击这里</p>
-</a>
+<main>
+  <header>
+    <h1>网页实验室</h1>
+    <p>纯前端 · 零依赖 · 打开即玩</p>
+  </header>
+
+  <div class="grid">
+    <a class="card bh" href="blackhole/">
+      <div class="top">
+        <img src="blackhole/favicon.svg" alt="">
+        <h2>奇点 · 网页黑洞</h2>
+      </div>
+      <p>基于广义相对论光线测地线积分的实时史瓦西黑洞渲染器：引力透镜、光子球与吸积盘多普勒增亮，全部在 GPU 上逐帧求解。</p>
+      <div class="tags"><i>WebGL2</i><i>GLSL</i><i>实时光线追踪</i></div>
+      <span class="go">进入 →</span>
+    </a>
+
+    <a class="card dino" href="dino-survival/">
+      <div class="top">
+        <img src="dino-survival/icon.svg" alt="">
+        <h2>侏罗纪求生 · 恐龙生存模拟器</h2>
+      </div>
+      <p>Canvas 2D 程序化绘制的开放生态：捕猎觅水、成长筑巢、元素吐息、人类部落与远古魔法，还有昼夜天气与生物 AI。支持手机触屏虚拟摇杆，可加入主屏离线玩。</p>
+      <div class="tags"><i>Canvas 2D</i><i>手机可玩</i><i>PWA 离线</i><i>零素材</i></div>
+      <span class="go">进入 →</span>
+    </a>
+  </div>
+
+  <footer>源码 · <a href="https://github.com/yuyuyuyulike/web-project">github.com/yuyuyuyulike/web-project</a></footer>
+</main>
 </body>
 </html>
