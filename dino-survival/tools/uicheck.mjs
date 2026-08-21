@@ -26,7 +26,7 @@ for (const c of htmlClasses) if (!css.includes("." + c)) problems.push("HTML cla
 
 // 引用的文件是否存在
 for (const m of html.matchAll(/(?:src|href)="([^"]+)"/g)) {
-  const f = m[1];
+  const f = m[1].split("?")[0];
   if (f.startsWith("http") || f.startsWith("data:") || f.startsWith("#")) continue;
   if (!fs.existsSync(f)) problems.push("index.html 引用了不存在的文件: " + f);
 }

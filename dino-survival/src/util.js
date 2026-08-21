@@ -79,6 +79,7 @@ window.DINO = window.DINO || {};
     return "rgb(" + (r | 0) + "," + (g | 0) + "," + (b | 0) + ")";
   }
 
+  D.VERSION = "1.3";
   D.util = {
     TAU: TAU, clamp: clamp, lerp: lerp, smoothstep: smoothstep, len: len,
     dist: dist, dist2: dist2, angleDiff: angleDiff, turnToward: turnToward,

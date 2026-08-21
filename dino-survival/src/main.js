@@ -245,10 +245,25 @@
       window.removeEventListener("pointerdown", unlock);
     };
     window.addEventListener("pointerdown", unlock);
-    // 离线支持（仅 http/https）
+    // 版本号（便于确认是否已更新）
+    var vs = byId("ver");
+    if (vs) vs.textContent = "v" + D.VERSION;
+    try { console.log("侏罗纪求生 v" + D.VERSION); } catch (e0) {}
+
+    // 离线支持 + 自动更新（仅 http/https）
     try {
       if ("serviceWorker" in navigator && location.protocol.indexOf("http") === 0) {
-        navigator.serviceWorker.register("sw.js").catch(function () {});
+        navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then(function (reg) {
+          try { reg.update(); } catch (e1) {}
+          setInterval(function () { try { reg.update(); } catch (e2) {} }, 60 * 60 * 1000);
+        }).catch(function () {});
+        navigator.serviceWorker.addEventListener("controllerchange", function () {
+          try {
+            if (sessionStorage.getItem("dino-sw-reload")) return;
+            sessionStorage.setItem("dino-sw-reload", "1");
+          } catch (e3) {}
+          location.reload();
+        });
       }
     } catch (e) {}
   }
