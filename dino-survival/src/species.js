@@ -85,6 +85,26 @@
       desc: "河岸边的死神，比霸王龙更快更长。"
     },
 
+    /* ---------------- 飞行生物 ---------------- */
+    ptero: {
+      key: "ptero", name: "无齿翼龙", latin: "Pteranodon", diet: "carn",
+      size: 15, speed: 216, hp: 72, dmg: 15, atkRate: 0.6, reach: 14,
+      appetite: 0.9, thirsty: 0.7, aggro: 620, brave: 0.5, herd: 2,
+      flying: true, cruiseAlt: 150, eggThief: true,
+      colors: { body: "#a08a62", belly: "#e8dcc0", accent: "#6b5738", eye: "#ffd257" },
+      art: { wings: true, crest: true, beak: true },
+      desc: "在高空盘旋的翼龙，会俯冲抓走小型猎物，也偷巢里的蛋。"
+    },
+    bat: {
+      key: "bat", name: "洞穴蝠龙", latin: "Cavernos", diet: "carn",
+      size: 8, speed: 246, hp: 30, dmg: 7, atkRate: 0.42, reach: 8,
+      appetite: 0.8, thirsty: 0.4, aggro: 460, brave: 0.9, herd: 6, cave: true,
+      flying: true, cruiseAlt: 62,
+      colors: { body: "#5b4a66", belly: "#b2a2c4", accent: "#2f2438", eye: "#ff8a5a" },
+      art: { wings: true, beak: true, ears: true },
+      desc: "地穴里成群的小飞龙，吵、快、脆。"
+    },
+
     /* ---------------- 人类部落（独立阵营，主动围猎恐龙） ---------------- */
     hunter: {
       key: "hunter", name: "部落猎人", latin: "Homo venator", diet: "omni", kind: "human",
@@ -175,4 +195,5 @@
   D.expNeed = expNeed;
   D.PLAYABLE = ["raptor", "para", "trike", "rex"];
   D.HUMANS = ["hunter", "spearman", "shaman", "chief"];
+  D.CAVE_SPECIES = ["bat", "compy", "wraith"];
 })(window.DINO);

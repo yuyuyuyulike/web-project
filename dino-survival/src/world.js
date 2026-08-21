@@ -3,7 +3,7 @@
   "use strict";
   var U = D.util;
 
-  var T = { DEEP: 0, WATER: 1, SAND: 2, GRASS: 3, FOREST: 4, ROCK: 5 };
+  var T = { DEEP: 0, WATER: 1, SAND: 2, GRASS: 3, FOREST: 4, ROCK: 5, CAVE: 6, LAVA: 7 };
   var TILE = 64;
 
   var INFO = [
@@ -12,7 +12,9 @@
     { speed: 0.94, solid: false, wet: false },
     { speed: 1.0, solid: false, wet: false },
     { speed: 0.84, solid: false, wet: false },
-    { speed: 0.0, solid: true, wet: false }
+    { speed: 0.0, solid: true, wet: false },
+    { speed: 1.0, solid: false, wet: false },
+    { speed: 0.52, solid: false, wet: false, lava: true }
   ];
 
   // 每种地形的两种色调，用噪声混合
@@ -22,14 +24,18 @@
     [[212, 194, 142], [230, 214, 166]],
     [[84, 138, 60], [108, 164, 78]],
     [[46, 100, 52], [62, 122, 64]],
-    [[112, 110, 118], [142, 140, 150]]
+    [[112, 110, 118], [142, 140, 150]],
+    [[74, 62, 56], [96, 82, 72]],
+    [[196, 62, 18], [255, 152, 40]]
   ];
 
-  function World(seed) {
+  function World(seed, opts) {
+    opts = opts || {};
     this.seed = seed | 0;
+    this.mode = opts.cave ? "cave" : "surface";
     this.tile = TILE;
-    this.cols = 90;
-    this.rows = 90;
+    this.cols = opts.cave ? 64 : 90;
+    this.rows = opts.cave ? 64 : 90;
     this.w = this.cols * TILE;
     this.h = this.rows * TILE;
     var n = this.cols * this.rows;
@@ -44,6 +50,9 @@
     this.crystals = [];
     this.runes = [];
     this.lights = [];
+    this.caves = [];
+    this.altars = [];
+    this.exitX = 0; this.exitY = 0;
     this.pcell = {};
     this.pcellSize = TILE * 4;
     this.regrowT = 0;
@@ -54,6 +63,7 @@
   World.prototype.idx = function (cx, cy) { return cy * this.cols + cx; };
 
   World.prototype.generate = function () {
+    if (this.mode === "cave") { this.generateCave(); return; }
     var s = this.seed, cols = this.cols, rows = this.rows, n = cols * rows;
     var ev = new Float32Array(n), mv = new Float32Array(n), rv = new Float32Array(n);
     var i, x, y;
@@ -102,7 +112,197 @@
     this.buildProps();
     this.buildVillageProps();
     this.buildMagicSites();
+    this.buildCaveEntrances();
     this.buildMini();
+  };
+
+  // ---------------- 地穴地图 ----------------
+  World.prototype.generateCave = function () {
+    var cols = this.cols, rows = this.rows, n = cols * rows;
+    var rng = U.mulberry32(this.seed ^ 0xc0ffee);
+    var i, x, y, dx, dy;
+    for (i = 0; i < n; i++) this.map[i] = T.ROCK;
+
+    var self = this;
+    var carve = function (px, py, rad, type) {
+      var r2 = rad * rad;
+      for (var yy = -rad; yy <= rad; yy++) {
+        for (var xx = -rad; xx <= rad; xx++) {
+          if (xx * xx + yy * yy > r2) continue;
+          var tx = Math.round(px) + xx, ty = Math.round(py) + yy;
+          if (tx < 2 || ty < 2 || tx >= cols - 2 || ty >= rows - 2) continue;
+          var k = ty * cols + tx;
+          if (type === T.CAVE || self.map[k] === T.CAVE) self.map[k] = type;
+        }
+      }
+    };
+
+    var cx = Math.floor(cols / 2), cy = Math.floor(rows / 2);
+    var rooms = [];
+    for (var wk = 0; wk < 5; wk++) {
+      var px = cx, py = cy, ang = rng() * U.TAU;
+      for (var s2 = 0; s2 < 300; s2++) {
+        ang += (rng() - 0.5) * 1.25;
+        px = U.clamp(px + Math.cos(ang) * 1.6, 3, cols - 4);
+        py = U.clamp(py + Math.sin(ang) * 1.6, 3, rows - 4);
+        carve(px, py, rng() < 0.16 ? 2 : 1, T.CAVE);
+        if (s2 % 70 === 0) rooms.push({ x: Math.round(px), y: Math.round(py) });
+      }
+    }
+    for (i = 0; i < rooms.length; i++) {
+      if (rng() < 0.55) carve(rooms[i].x, rooms[i].y, 3 + Math.floor(rng() * 3), T.CAVE);
+    }
+    carve(cx, cy, 5, T.CAVE);
+
+    // 地下水潭
+    for (var wp = 0; wp < 5; wp++) {
+      var rm = rooms[Math.floor(rng() * rooms.length)];
+      if (!rm || U.dist(rm.x, rm.y, cx, cy) < 9) continue;
+      carve(rm.x, rm.y, 2 + Math.floor(rng() * 2), T.WATER);
+    }
+    // 岩浆：挑离入口最远的几个房间，保证一定存在
+    var lavaTiles = [];
+    var byDist = rooms.slice().sort(function (a, b) {
+      return U.dist(b.x, b.y, cx, cy) - U.dist(a.x, a.y, cx, cy);
+    });
+    for (var lp = 0; lp < Math.min(6, byDist.length); lp++) {
+      carve(byDist[lp].x, byDist[lp].y, 1 + Math.floor(rng() * 3), T.LAVA);
+    }
+    carve(cx, cy, 5, T.CAVE);   // 入口大厅保持安全
+
+    var CAVE_ROCK = [[38, 32, 30], [58, 50, 46]];
+    for (y = 0; y < rows; y++) {
+      for (x = 0; x < cols; x++) {
+        i = y * cols + x;
+        var t = this.map[i];
+        var tn = U.noise2(x * 0.7, y * 0.7, this.seed + 31);
+        var pal = t === T.ROCK ? CAVE_ROCK : PAL[t];
+        var c = U.mixc(pal[0], pal[1], tn);
+        this.color[i] = U.rgb(c);
+        this.dark[i] = U.rgb([c[0] * 0.7, c[1] * 0.7, c[2] * 0.7]);
+        if (t === T.LAVA && lavaTiles.length < 22 && (x + y) % 3 === 0) lavaTiles.push({ x: x, y: y });
+      }
+    }
+    this.buildFlags();
+
+    // 出口（回地面）
+    this.exitX = cx * TILE + TILE / 2;
+    this.exitY = cy * TILE + TILE / 2;
+    this.addProp({ kind: "caveExit", x: this.exitX, y: this.exitY, r: 30, seed: 7 });
+    this.lights.push({ x: this.exitX, y: this.exitY, r: 190, kind: "sky" });
+
+    // 祭坛放在离入口最远、且四周有空间的洞穴地砖上
+    var far = null, farD = -1;
+    for (y = 3; y < rows - 3; y++) {
+      for (x = 3; x < cols - 3; x++) {
+        if (this.map[y * cols + x] !== T.CAVE) continue;
+        var open = 0;
+        for (var oy = -1; oy <= 1; oy++) {
+          for (var ox = -1; ox <= 1; ox++) {
+            if (this.map[(y + oy) * cols + (x + ox)] === T.CAVE) open++;
+          }
+        }
+        if (open < 7) continue;
+        var dd2 = U.dist(x, y, cx, cy);
+        if (dd2 > farD) { farD = dd2; far = { x: x, y: y }; }
+      }
+    }
+    if (far) {
+      var ax = far.x * TILE + TILE / 2, ay = far.y * TILE + TILE / 2;
+      var altar = { kind: "altar", x: ax, y: ay, r: 30, seed: 3, used: false };
+      this.altars.push(altar);
+      this.addProp(altar);
+      this.lights.push({ x: ax, y: ay, r: 210, kind: "rune" });
+      this.bossX = ax; this.bossY = ay;
+    }
+
+    this.buildCaveProps(rng, lavaTiles);
+    this.buildMini();
+  };
+
+  World.prototype.buildCaveProps = function (rng, lavaTiles) {
+    var cols = this.cols, rows = this.rows, i, x, y;
+    for (y = 2; y < rows - 2; y++) {
+      for (x = 2; x < cols - 2; x++) {
+        i = y * cols + x;
+        if (this.map[i] !== T.CAVE) continue;
+        var bx = x * TILE + rng() * TILE, by = y * TILE + rng() * TILE;
+        var r = rng();
+        if (r < 0.07) {
+          var mush = { kind: "mushroom", x: bx, y: by, r: 13 + rng() * 7, seed: rng() * 100, food: 110, max: 110 };
+          this.addProp(mush);
+          if (this.lights.length < 150) this.lights.push({ x: bx, y: by, r: 74, kind: "moss" });
+        } else if (r < 0.14) {
+          this.addProp({ kind: "spike", x: bx, y: by, r: 12 + rng() * 14, seed: rng() * 100 });
+        } else if (r < 0.17) {
+          this.addProp({ kind: "bones", x: bx, y: by, r: 12, seed: rng() * 100 });
+        } else if (r < 0.185) {
+          this.addProp({ kind: "rock", x: bx, y: by, r: 9 + rng() * 9, seed: rng() * 100 });
+        }
+      }
+    }
+    // 水晶簇
+    var tries = 0;
+    while (this.crystals.length < 16 && tries++ < 500) {
+      var s = this.randomSpawn(rng, 22);
+      var ok = true;
+      for (i = 0; i < this.crystals.length; i++) {
+        if (U.dist2(s.x, s.y, this.crystals[i].x, this.crystals[i].y) < 340 * 340) { ok = false; break; }
+      }
+      if (!ok) continue;
+      var c = { kind: "crystal", x: s.x, y: s.y, r: 20 + rng() * 10, seed: rng() * 100 };
+      this.crystals.push(c);
+      this.addProp(c);
+      this.lights.push({ x: c.x, y: c.y, r: 140, kind: "mana" });
+    }
+    // 一个古老符文圈
+    tries = 0;
+    while (this.runes.length < 2 && tries++ < 400) {
+      var s2 = this.randomSpawn(rng, 34);
+      if (U.dist(s2.x, s2.y, this.exitX, this.exitY) < 400) continue;
+      var rn = { kind: "rune", x: s2.x, y: s2.y, r: 74, cd: 0, seed: rng() * 100 };
+      this.runes.push(rn);
+      this.addProp(rn);
+      this.lights.push({ x: rn.x, y: rn.y, r: 150, kind: "rune" });
+    }
+    // 岩浆光源
+    for (i = 0; i < lavaTiles.length; i++) {
+      this.lights.push({
+        x: lavaTiles[i].x * TILE + TILE / 2, y: lavaTiles[i].y * TILE + TILE / 2,
+        r: 130, kind: "fire"
+      });
+    }
+  };
+
+  // ---------------- 地表洞口 ----------------
+  World.prototype.buildCaveEntrances = function () {
+    var rng = U.mulberry32(this.seed ^ 0xca7e11);
+    var pass, tries, i;
+    for (pass = 0; pass < 2; pass++) {
+      tries = 0;
+      while (this.caves.length < 3 && tries++ < 3000) {
+        var x = 320 + rng() * (this.w - 640), y = 320 + rng() * (this.h - 640);
+        if (!this.canWalk(x, y, 32)) continue;
+        if (this.inVillage(x, y, 280)) continue;
+        if (pass === 0) {
+          var nearRock = false;
+          for (var a = 0; a < 10; a++) {
+            var ang = a / 10 * U.TAU;
+            if (this.typeAt(x + Math.cos(ang) * 76, y + Math.sin(ang) * 76) === T.ROCK) { nearRock = true; break; }
+          }
+          if (!nearRock) continue;
+        }
+        var far = true;
+        for (i = 0; i < this.caves.length; i++) {
+          if (U.dist2(x, y, this.caves[i].x, this.caves[i].y) < 1300 * 1300) { far = false; break; }
+        }
+        if (!far) continue;
+        var c = { kind: "caveEntrance", x: x, y: y, r: 30, seed: rng() * 100, id: this.caves.length };
+        this.caves.push(c);
+        this.addProp(c);
+      }
+      if (this.caves.length >= 3) break;
+    }
   };
 
   // 部落营地：选一片开阔平地，营地范围内不长树
@@ -233,7 +433,7 @@
     if (!this.buckets[i]) this.buckets[i] = [];
     this.buckets[i].push(p);
     this.props.push(p);
-    if (p.kind === "fern" || p.kind === "bush") {
+    if (p.kind === "fern" || p.kind === "bush" || p.kind === "mushroom") {
       this.plants.push(p);
       var k = this.pkey(p.x, p.y);
       if (!this.pcell[k]) this.pcell[k] = [];

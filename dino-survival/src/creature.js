@@ -47,6 +47,10 @@
     this.waterMemo = null; this.waterMemoT = 0;
     this.eatT = 0; this.stepAcc = 0; this.age = 0;
     this.stuckT = 0; this.ignoreId = 0; this.ignoreT = 0;
+    this.alt = this.def.flying ? (this.def.cruiseAlt || 140) : 0;
+    this.altTarget = this.alt;
+    this.diveT = 0; this.eggTarget = null;
+    this.aimAng = this.face; this.faceLock = 0;
     this.untargetable = false;
     this.trailT = 0;
   }
@@ -76,6 +80,9 @@
     else this.hp = this.maxHp;
     if (this.mana > this.manaMax) this.mana = this.manaMax;
   };
+
+  // 飞在高空时近战打不到，也打不着别人
+  P.airborne = function () { return this.alt > 45; };
 
   P.reach = function (o) {
     return this.radius * 0.82 + o.radius * 0.82 + this.def.reach * this.scale * 0.95;
@@ -261,6 +268,7 @@
       }
       if (o.sp === this.sp && !o.isPlayer && !o.ally && !this.ally && dd < 340) { hx += o.x; hy += o.y; hn++; }
       if (dd > aggroR) continue;
+      if (o.airborne && o.airborne() && !this.def.flying && !this.def.ranged) continue;
       var j = this.judge(o);
       if (j === "threat") {
         if (dd < threatD) { threat = o; threatD = dd; }
@@ -275,6 +283,16 @@
 
     var hungry = this.hunger < 74;
     var thirsty = this.thirst < 46 && d.thirsty > 0;
+
+    if (d.flying) {
+      this.altTarget = d.cruiseAlt || 140;
+      if (d.eggThief && hungry && game.eggs.length && game.player && !game.underground) {
+        var far = U.dist(game.player.x, game.player.y, game.eggs[0].x, game.eggs[0].y) > 620;
+        if (far && U.dist(this.x, this.y, game.eggs[0].x, game.eggs[0].y) < 1100) {
+          this.state = "eggraid"; this.eggTarget = game.eggs[0]; return;
+        }
+      }
+    }
 
     if (this.ally) {
       if (threat && threatD < 420) { this.state = "fight"; this.target = threat; }
@@ -353,6 +371,26 @@
         }
         this.moveDir(ang + Math.sin(this.age * 1.7) * 0.25, 1.0);
         this.sprinting = this.stamina > 6;
+        if (d.flying) this.altTarget = d.cruiseAlt || 140;
+        break;
+      }
+      case "eggraid": {
+        var eg = this.eggTarget;
+        if (!eg || game.eggs.indexOf(eg) < 0) { this.eggTarget = null; this.state = "wander"; break; }
+        var ed = U.dist(this.x, this.y, eg.x, eg.y);
+        this.altTarget = ed < 190 ? 0 : (d.cruiseAlt || 140);
+        this.moveTo(eg.x, eg.y, 0.95);
+        if (ed < this.radius + 26 && this.alt < 22) {
+          var idx = game.eggs.indexOf(eg);
+          if (idx >= 0) game.eggs.splice(idx, 1);
+          this.eggTarget = null;
+          this.hunger = Math.min(100, this.hunger + 45);
+          this.altTarget = d.cruiseAlt || 140;
+          this.state = "wander";
+          game.fx.spray(eg.x, eg.y, 12, { col: "#efe4c8", r: 3, sp: 90, up: 60, life: 0.6 });
+          game.toast("翼龙抢走了一枚蛋！", "bad");
+          D.Audio.hurt();
+        }
         break;
       }
       case "fight":
@@ -361,6 +399,21 @@
         if (!t || t.remove || (t.dead && this.state === "fight")) { this.state = "wander"; this.target = null; break; }
         if (t.dead) { this.state = d.hunter ? "wander" : "scavenge"; break; }
         var dist = U.dist(this.x, this.y, t.x, t.y);
+        if (d.flying) {
+          // 俯冲攻击 -> 咬完拉升；俯冲超时也拉升，避免一直贴地
+          if (this.diveT > 0) this.diveT -= dt;
+          this.altTarget = (dist < 230 && this.diveT <= 0) ? 0 : (d.cruiseAlt || 140);
+          if (this.altTarget === 0) {
+            this.diveHold = (this.diveHold || 0) + dt;
+            if (this.diveHold > 3) { this.diveHold = 0; this.diveT = 2.6; this.altTarget = d.cruiseAlt || 140; }
+          } else this.diveHold = 0;
+          var rrF = this.reach(t) + 10;
+          this.moveTo(t.x, t.y, dist < rrF ? 0.35 : 1.0);
+          if (dist < rrF && this.alt < 34) {
+            if (this.tryAttack(game, t)) { this.diveT = 2.2 + Math.random(); this.altTarget = d.cruiseAlt || 140; }
+          }
+          break;
+        }
         if (dist > d.aggro * 1.8) { this.target = null; this.state = "wander"; break; }
         var rr = this.reach(t);
         // 瞬移偷袭
@@ -501,14 +554,27 @@
   P.integrate = function (dt, game) {
     var w = game.world;
     if (this.def["static"]) { this.speedNow = 0; return; }
-    this.unstick(game);
+    if (!this.def.flying) this.unstick(game);
+
+    // 高度插值（飞行生物）
+    if (this.def.flying) {
+      var rate = (this.altTarget < this.alt ? 210 : 120) * dt;
+      if (this.alt < this.altTarget) this.alt = Math.min(this.altTarget, this.alt + rate);
+      else if (this.alt > this.altTarget) this.alt = Math.max(this.altTarget, this.alt - rate);
+    }
 
     var moveAng = this.isPlayer ? this.dirWanted : this.face;
     var turn = (this.isPlayer ? 16 : 4.6 + this.speed * 0.012) * dt;
-    this.face = U.turnToward(this.face, this.dirWanted, turn);
+    // 玩家撕咬/吐息时短暂锁定朝向：只影响朝向与判定，不影响移动
+    if (this.isPlayer && this.faceLock > 0) {
+      this.faceLock -= dt;
+      this.face = U.turnToward(this.face, this.aimAng, 26 * dt);
+    } else {
+      this.face = U.turnToward(this.face, this.dirWanted, turn);
+    }
     if (this.isPlayer && this.throttle <= 0.01) moveAng = this.face;
 
-    var terrain = w.speedAt(this.x, this.y);
+    var terrain = this.def.flying ? 1 : w.speedAt(this.x, this.y);
     var hungerPenalty = (this.hunger <= 0 || (this.def.thirsty > 0 && this.thirst <= 0)) ? 0.66 : 1;
     var chillMul = this.chill > 0 ? 0.55 : 1;
     var blessMul = (this.bless && this.bless.speed) ? this.bless.speed : 1;
@@ -523,17 +589,31 @@
     var r = this.radius * 0.78;
     var nx = this.x + (this.vx + this.kx) * dt;
     var ny = this.y + (this.vy + this.ky) * dt;
-    if (w.canWalk(nx, this.y, r)) this.x = nx; else { this.vx *= -0.15; this.kx *= -0.3; }
-    if (w.canWalk(this.x, ny, r)) this.y = ny; else { this.vy *= -0.15; this.ky *= -0.3; }
+    if (this.def.flying && this.alt > 12) {
+      // 空中无视地形，只受世界边界限制
+      this.x = U.clamp(nx, 40, w.w - 40);
+      this.y = U.clamp(ny, 40, w.h - 40);
+    } else {
+      if (w.canWalk(nx, this.y, r)) this.x = nx; else { this.vx *= -0.15; this.kx *= -0.3; }
+      if (w.canWalk(this.x, ny, r)) this.y = ny; else { this.vy *= -0.15; this.ky *= -0.3; }
+    }
     var decay = Math.pow(0.0015, dt);
     this.kx *= decay; this.ky *= decay;
 
     this.speedNow = U.len(this.vx, this.vy);
-    this.phase += this.speedNow * dt * 0.052 + dt * 0.5;
+    this.phase += this.speedNow * dt * 0.052 + dt * (this.def.flying ? 2.6 : 0.5);
+
+    // 岩浆烧伤（地穴）
+    if (!this.def.flying || this.alt < 14) {
+      if (w.typeAt(this.x, this.y) === D.T.LAVA && D.Magic) {
+        D.Magic.applyBurn(this, 2.4, 16, game);
+      }
+    }
 
     // 脚步 / 涉水 / 火痕
     this.stepAcc += this.speedNow * dt;
     var stepLen = 46 * this.scale;
+    if (this.def.flying && this.alt > 16) this.stepAcc = 0;
     if (this.stepAcc > stepLen) {
       this.stepAcc = 0;
       if (game.near(this, 900)) {
@@ -545,8 +625,16 @@
     if (this.def.fireTrail && this.speedNow > 30) {
       this.trailT -= dt;
       if (this.trailT <= 0) {
-        this.trailT = 0.5;
-        if (!w.isWater(this.x, this.y) && !w.solidAt(this.x, this.y)) {
+        this.trailT = 0.42;
+        if (w.isWater(this.x, this.y)) {
+          // 熔岩之躯入水：冒蒸汽而不是留火
+          if (game.near(this, 900)) {
+            game.fx.spray(this.x, this.y - this.radius * 0.2, 5, {
+              col: "rgba(226,236,240,0.85)", r: 5, sp: 26, up: 44, g: -30, life: 0.9
+            });
+            D.Audio.splash();
+          }
+        } else if (!w.solidAt(this.x, this.y)) {
           game.fires.push({ x: this.x, y: this.y, r: 44, t: 4, dmgT: 0.4, own: "n" });
         }
       }

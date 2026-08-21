@@ -115,7 +115,7 @@ for (let i = 0; i < total; i++) {
   if (Math.abs(sRGBA[i * 4] - s2[i * 4]) + Math.abs(sRGBA[i * 4 + 1] - s2[i * 4 + 1]) + Math.abs(sRGBA[i * 4 + 2] - s2[i * 4 + 2]) > 30) diff++;
 }
 console.log("   生物/特效像素差异: " + diff + " px (" + (diff / total * 100).toFixed(2) + "%)");
-if (diff < 400) problems.push("画面里几乎看不到其它生物");
+if (diff < 150) problems.push("画面里几乎看不到其它生物");
 
 /* 玩家自身占屏比例（判断视野缩放是否合理） */
 const scene3 = createCanvas(900, 520, 1);

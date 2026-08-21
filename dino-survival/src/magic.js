@@ -159,10 +159,11 @@
       for (var i = 0; i < list.length; i++) {
         var o = list[i];
         if (!hostile(c, o)) continue;
-        var dd = U.dist(mx, my, o.x, o.y);
+        var dd = U.dist(c.x, c.y, o.x, o.y);
         if (dd > range + o.radius) continue;
-        var ang = Math.atan2(o.y - my, o.x - mx);
-        if (Math.abs(U.angleDiff(c.face, ang)) > b.arc + o.radius / Math.max(60, dd)) continue;
+        var ang = Math.atan2(o.y - c.y, o.x - c.x);
+        var slack = b.arc + Math.min(1.2, o.radius / Math.max(40, dd)) + (dd < c.radius + o.radius + 26 ? 1.0 : 0);
+        if (Math.abs(U.angleDiff(c.face, ang)) > slack) continue;
         o.damage(dmg, c, game);
         if (b.burn) applyBurn(o, b.burn, b.burnDmg, game);
         if (b.chill) applyChill(o, b.chill);
@@ -306,6 +307,7 @@
           if (c.dead || c.remove || c === p.owner) continue;
           if (c.faction() === p.side) continue;
           if (c.def.ignoreAI) continue;
+          if (c.alt > 60) continue;
           if (U.dist(p.x, p.y, c.x, c.y - c.radius * 0.4) > c.radius * 0.95 + p.r) continue;
           hitC = c; break;
         }

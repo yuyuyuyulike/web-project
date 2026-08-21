@@ -233,6 +233,12 @@ const boss = game.creatures.filter((c) => c.def.boss && !c.dead);
 check("可触发龙王降临事件", game.event === "dragonlord" && boss.length === 1, "event=" + game.event + " boss=" + boss.length);
 if (boss.length) {
   const b = boss[0];
+  let dry = null;
+  for (let a = 0; a < 60 && !dry; a++) {
+    const cand = game.world.findLand(p.x + 240 + a * 25, p.y + 40, 44);
+    if (!game.world.isWater(cand.x, cand.y)) dry = cand;
+  }
+  if (dry) { b.x = dry.x; b.y = dry.y; }
   b.target = p; b.state = "hunt";
   const firesBefore = game.fires.length;
   step(180);

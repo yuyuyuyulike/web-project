@@ -16,6 +16,9 @@
     meteor: "劫后余生 · 在陨石雨中活下来",
     fullgrown: "霸主 · 达到最终成长阶段",
     village: "不速之客 · 发现人类营地",
+    cave: "地心探险 · 钻进地穴",
+    altar: "祭坛的馈赠 · 从远古祭坛取得遗物",
+    skyhunter: "空中猎手 · 咬下一只翼龙",
     totem: "推倒图腾 · 摧毁一座部落图腾",
     relic: "远古馈赠 · 获得第一件遗物",
     rune: "符文低语 · 在符文圈获得祝福",
@@ -55,7 +58,9 @@
     this.selected = "raptor";
     this.hudT = 0; this.miniT = 0; this.saveT = 0; this.warnT = 0;
     this.sleeping = false; this.sleepFade = 0;
-    this.playerTarget = null; this.currentAct = null;
+    this.playerTarget = null; this.currentAct = null; this.aimTarget = null;
+    this.inCave = false; this.underground = false; this.caveWorld = null;
+    this.surfaceSnap = null; this.portalT = 0; this.caveBoss = false; this.moveNestT = 0;
     this.paused = false; this.lastTs = 0; this.running = false;
     this.settings = { sound: true, hand: "left", quality: "high", vibe: true, touch: "auto", zoom: "mid" };
     this.el = {};
@@ -184,7 +189,9 @@
       localStorage.setItem(SAVE_KEY, JSON.stringify({
         v: 1, seed: this.seedVal, sp: p.sp, day: this.day, tod: this.tod,
         level: p.level, exp: p.exp, hp: p.hp, hunger: p.hunger, thirst: p.thirst,
-        x: p.x, y: p.y, stats: this.stats, ach: this.ach,
+        x: (this.inCave && this.surfaceSnap) ? this.surfaceSnap.x : p.x,
+        y: (this.inCave && this.surfaceSnap) ? this.surfaceSnap.y : p.y,
+        stats: this.stats, ach: this.ach,
         nest: this.nest ? { x: this.nest.x, y: this.nest.y } : null,
         relics: p.relics || null, mana: Math.round(p.mana),
         villages: (this.world.villages || []).map(function (v) {
@@ -207,6 +214,9 @@
     this.projectiles.length = 0;
     this.fx.clear();
     this.nest = null; this.sleeping = false; this.sleepFade = 0;
+    this.inCave = false; this.underground = false; this.caveWorld = null;
+    this.surfaceSnap = null; this.portalT = 0; this.caveBoss = false; this.moveNestT = 0;
+    this.aimTarget = null;
     this.day = 1; this.tod = 0.26; this.time = 0;
     this.weather = { type: "clear", name: "☀ 晴朗", t: 34, rain: 0, fog: 0, tr: 0, tf: 0, wind: 0.25, strikeT: 6 };
     this.event = null; this.eventT = 0; this.nextEventT = 70 + Math.random() * 50; this.predBuff = 1;
@@ -256,7 +266,6 @@
     this.updateCamera(0.016);
     this.initPopulation();
     this.buildGrid();
-    this.initFlyers();
     this.state = "play";
     this.paused = false;
     this.show(null);
@@ -277,7 +286,7 @@
   G.popTargets = function () {
     var day = this.day;
     return {
-      compy: 12, para: 7, trike: 4, stego: 3, anky: 2,
+      compy: 12, para: 7, trike: 4, stego: 3, anky: 2, ptero: 3,
       raptor: 2 + Math.min(4, day - 1),
       rex: day >= 2 ? 1 : 0,
       spino: day >= 4 ? 1 : 0
@@ -384,11 +393,13 @@
     this.updateEggs(dt);
     this.updateMeteors(dt);
     this.updateFires(dt);
-    this.updateFlyers(dt);
     D.Magic.updateProjectiles(this, dt);
     D.Magic.updateVillages(this, dt);
     D.Magic.updateWorldMagic(this, dt);
     if (this.manaWarnT > 0) this.manaWarnT -= dt;
+    if (this.portalT > 0) this.portalT -= dt;
+    if (this.moveNestT > 0) this.moveNestT -= dt;
+    this.aimTarget = this.pickAimTarget(this.player.radius * 0.9 + this.player.def.reach * this.player.scale + 22, 3.2, false);
     this.world.update(dt, this.weather.rain > 0.3);
     this.fx.update(dt);
     this.updateSleep(dt);
@@ -420,6 +431,7 @@
     var warmDusk = Math.max(0, 1 - Math.abs(t - 0.765) / 0.07);
     var warmDawn = Math.max(0, 1 - Math.abs(t - 0.245) / 0.06);
     this.warm = Math.min(1, warmDusk + warmDawn * 0.7);
+    if (this.underground) { this.light = 0.1; this.night = 0.9; this.darkness = 0.9; this.warm = 0; }
   };
 
   G.onNewDay = function () {
@@ -432,6 +444,13 @@
 
   G.updateWeather = function (dt) {
     var w = this.weather;
+    if (this.underground) {
+      D.Audio.setRain(0);
+      D.Audio.setWind(0.05);
+      this.flash = Math.max(0, this.flash - dt * 3.2);
+      w.t -= dt * 0.5;
+      return;
+    }
     w.t -= dt;
     if (w.t <= 0) {
       var total = 0, i;
@@ -499,6 +518,7 @@
       if (this.eventT <= 0) this.endEvent();
       return;
     }
+    if (this.underground) return;
     this.nextEventT -= dt;
     if (this.nextEventT <= 0) this.startEvent();
   };
@@ -710,11 +730,12 @@
     var l = this.creatures;
     for (var i = 0; i < l.length; i++) {
       var a = l[i];
-      if (a.dead) continue;
+      if (a.dead || (a.airborne && a.airborne())) continue;
       var nb = this.neighbors(a.x, a.y, a.radius * 2 + 60);
       for (var k = 0; k < nb.length; k++) {
         var b = nb[k];
         if (b === a || b.dead || b.id < a.id) continue;
+        if (b.airborne && b.airborne()) continue;
         var dx = b.x - a.x, dy = b.y - a.y;
         var d = Math.sqrt(dx * dx + dy * dy) || 0.001;
         var min = (a.radius + b.radius) * 0.85;
@@ -735,6 +756,7 @@
     this.popT = 2.5;
     var p = this.player;
     if (!p) return;
+    if (this.underground) { this.cavePop(false); return; }
     var counts = {}, i, c;
     for (i = 0; i < this.creatures.length; i++) {
       c = this.creatures[i];
@@ -791,6 +813,104 @@
       this.vibrate(80);
       D.Audio.roar(1.6);
     } else if (!found) this.dangerFlag = false;
+  };
+
+  // ---------------- 地穴 ----------------
+  G.cavePop = function (initial) {
+    var p = this.player;
+    if (!p) return;
+    var rng = Math.random;
+    var counts = {}, i;
+    for (i = 0; i < this.creatures.length; i++) {
+      var c = this.creatures[i];
+      if (c.isPlayer || c.ally || c.dead) continue;
+      counts[c.sp] = (counts[c.sp] || 0) + 1;
+      if (!c.def.boss && U.dist2(c.x, c.y, p.x, p.y) > 2100 * 2100) c.remove = true;
+    }
+    var targets = { bat: 7, compy: 4, wraith: 2 };
+    for (var k in targets) {
+      var missing = targets[k] - (counts[k] || 0);
+      var batch = Math.min(missing, initial ? 9 : 2);
+      for (var b = 0; b < batch; b++) {
+        var s = this.world.spawnRing(rng, p.x, p.y, initial ? 320 : 640, 1500, D.SPECIES[k].size);
+        if (s) this.spawn(k, s.x, s.y, { level: 2 + Math.floor(rng() * (2 + this.day)) });
+      }
+    }
+    if (!this.caveBoss && this.world.bossX != null) {
+      this.caveBoss = true;
+      var bl = this.world.findLand(this.world.bossX + 70, this.world.bossY + 30, 44);
+      var boss = this.spawn("lavarex", bl.x, bl.y, { level: 5 + Math.min(9, this.day) });
+      if (boss) { boss.homeX = bl.x; boss.homeY = bl.y; }
+    }
+  };
+
+  G.enterCave = function (entrance) {
+    if (this.inCave || !entrance) return;
+    var p = this.player, i;
+    if (!this.caveWorld) this.caveWorld = new D.World((this.seedVal ^ 0x5eed37) | 0, { cave: true });
+    this.surfaceSnap = {
+      world: this.world, creatures: this.creatures, eggs: this.eggs, fires: this.fires,
+      meteors: this.meteors, projectiles: this.projectiles, nest: this.nest,
+      x: entrance.x, y: entrance.y + 52
+    };
+    var keep = [p];
+    for (i = 0; i < this.allies.length; i++) if (!this.allies[i].dead) keep.push(this.allies[i]);
+    this.world = this.caveWorld;
+    this.inCave = true;
+    this.underground = true;
+    this.creatures = keep;
+    this.eggs = []; this.fires = []; this.meteors = []; this.projectiles = [];
+    this.nest = null;
+    this.fx.clear();
+    var ex = this.world.exitX, ey = this.world.exitY;
+    var lp = this.world.findLand(ex, ey + 46, p.radius);
+    p.x = lp.x; p.y = lp.y; p.alt = 0;
+    for (i = 1; i < keep.length; i++) {
+      keep[i].x = lp.x + (Math.random() - 0.5) * 70;
+      keep[i].y = lp.y + 30 + Math.random() * 30;
+    }
+    this.buildGrid();
+    this.cavePop(true);
+    this.buildGrid();
+    this.cam.x = p.x; this.cam.y = p.y;
+    this.updateCamera(0.016);
+    this.drawMinimap();
+    this.portalT = 1.6;
+    this.toast("你钻进了地穴 —— 没有阳光，注意岩浆", "info");
+    this.unlock("cave");
+    D.Audio.roar(0.7);
+    this.save();
+  };
+
+  G.exitCave = function () {
+    if (!this.inCave || !this.surfaceSnap) return;
+    var p = this.player, s = this.surfaceSnap, i;
+    var keep = [p];
+    for (i = 0; i < this.allies.length; i++) if (!this.allies[i].dead) keep.push(this.allies[i]);
+    this.world = s.world;
+    this.inCave = false;
+    this.underground = false;
+    this.creatures = s.creatures;
+    for (i = 0; i < keep.length; i++) {
+      if (this.creatures.indexOf(keep[i]) < 0) this.creatures.push(keep[i]);
+    }
+    this.eggs = s.eggs; this.fires = s.fires; this.meteors = s.meteors; this.projectiles = s.projectiles;
+    this.nest = s.nest;
+    this.fx.clear();
+    var lp = this.world.findLand(s.x, s.y, p.radius);
+    p.x = lp.x; p.y = lp.y; p.alt = 0;
+    for (i = 1; i < keep.length; i++) {
+      keep[i].x = lp.x + (Math.random() - 0.5) * 70;
+      keep[i].y = lp.y + 34;
+    }
+    this.surfaceSnap = null;
+    this.buildGrid();
+    this.cam.x = p.x; this.cam.y = p.y;
+    this.updateCamera(0.016);
+    this.drawMinimap();
+    this.portalT = 1.6;
+    this.toast("回到地面，阳光真好", "good");
+    this.save();
   };
 
   G.updateAllies = function (dt) {
@@ -863,10 +983,14 @@
     }
     if (In.btn.attack) this.doAttack();
     if (In.btn.breath) this.doBreath();
-    if (In.btn.act && this.currentAct) this.performAct(this.currentAct, dt);
+    var actTap = In.consume("act");
+    if (this.currentAct) {
+      var at = this.currentAct.type;
+      var portal = (at === "cave" || at === "exit" || at === "altar");
+      if (portal ? actTap : In.btn.act) this.performAct(this.currentAct, dt);
+    }
     if (In.consume("roar")) this.doRoar();
     if (In.consume("nest")) this.nestAction();
-    In.consume("act");
     In.consume("attack");
     In.consume("breath");
   };
@@ -874,6 +998,24 @@
   G.resolveAct = function () {
     var p = this.player;
     if (!p || p.dead) return null;
+    if (this.inCave) {
+      if (this.portalT <= 0 && U.dist2(p.x, p.y, this.world.exitX, this.world.exitY) < 46 * 46) {
+        return { type: "exit", label: "出洞" };
+      }
+      var als = this.world.altars || [];
+      for (var ai = 0; ai < als.length; ai++) {
+        if (!als[ai].used && U.dist2(p.x, p.y, als[ai].x, als[ai].y) < 72 * 72) {
+          return { type: "altar", target: als[ai], label: "取遗物" };
+        }
+      }
+    } else if (this.portalT <= 0) {
+      var cvs = this.world.caves || [];
+      for (var ci = 0; ci < cvs.length; ci++) {
+        if (U.dist2(p.x, p.y, cvs[ci].x, cvs[ci].y) < 46 * 46) {
+          return { type: "cave", target: cvs[ci], label: "进洞" };
+        }
+      }
+    }
     var rs = this.world.runes || [];
     for (var ri = 0; ri < rs.length; ri++) {
       var rn = rs[ri];
@@ -913,6 +1055,20 @@
     } else if (act.type === "graze") {
       p.grazePlant(act.target, dt, this);
       this.stats.meals += dt;
+    } else if (act.type === "cave") {
+      this.enterCave(act.target);
+    } else if (act.type === "exit") {
+      this.exitCave();
+    } else if (act.type === "altar") {
+      if (!act.target.used) {
+        act.target.used = true;
+        D.Magic.giveRelic(this);
+        p.mana = p.manaMax;
+        p.hp = Math.min(p.maxHp, p.hp + p.maxHp * 0.3);
+        this.fx.ring(act.target.x, act.target.y, 12, 210, "rgba(255,206,84,0.9)", 1.0);
+        this.toast("远古祭坛回应了你的血脉", "good");
+        this.unlock("altar");
+      }
     } else if (act.type === "rune") {
       D.Magic.activateRune(this, act.target);
     } else if (act.type === "drink") {
@@ -926,27 +1082,53 @@
     }
   };
 
+  // 自动选取最合适的撕咬目标（不改变移动方向，只调整攻击朝向）
+  G.pickAimTarget = function (range, arc, allowAir) {
+    var p = this.player;
+    if (!p || p.dead) return null;
+    var list = this.neighbors(p.x, p.y, range + 90);
+    var best = null, bestScore = 1e9;
+    for (var i = 0; i < list.length; i++) {
+      var o = list[i];
+      if (o === p || o.remove || o.dead || o.ally) continue;
+      if (!allowAir && o.airborne && o.airborne()) continue;
+      var d = U.dist(p.x, p.y, o.x, o.y);
+      if (d > range + o.radius) continue;
+      var ang = Math.atan2(o.y - p.y, o.x - p.x);
+      var off = Math.abs(U.angleDiff(p.face, ang));
+      if (off > arc) continue;
+      var score = d + off * 40 + (o.def["static"] ? 50 : 0) + (o.hp < o.maxHp * 0.4 ? -40 : 0);
+      if (score < bestScore) { bestScore = score; best = o; }
+    }
+    return best;
+  };
+
   G.doAttack = function () {
     var p = this.player;
     if (p.attackCd > 0 || p.dead) return;
+    var reach = p.radius * 0.9 + p.def.reach * p.scale + 22;
+    var aim = this.pickAimTarget(reach, 3.2, false);
+    var aimAng = aim ? Math.atan2(aim.y - p.y, aim.x - p.x) : p.face;
+    p.aimAng = aimAng;
+    p.faceLock = 0.34;                       // 只锁朝向，移动仍由摇杆决定
     p.attackCd = p.def.atkRate * 0.92;
     p.atkAnim = 0.3;
     p.stamina = Math.max(0, p.stamina - 4);
     D.Audio.bite(p.scale);
-    var reach = p.radius * 0.9 + p.def.reach * p.scale + 30;
     this.fx.slash(
-      p.x + Math.cos(p.face) * p.radius * 0.7,
-      p.y + Math.sin(p.face) * p.radius * 0.7 - p.radius * 0.35,
-      p.face, reach * 0.85
+      p.x + Math.cos(aimAng) * p.radius * 0.7,
+      p.y + Math.sin(aimAng) * p.radius * 0.7 - p.radius * 0.35,
+      aimAng, reach * 0.85
     );
     var list = this.neighbors(p.x, p.y, reach + 60), hit = 0;
     for (var i = 0; i < list.length; i++) {
       var o = list[i];
       if (o === p || o.remove || o.dead || o.ally) continue;
+      if (o.airborne && o.airborne()) continue;
       var dd = U.dist(p.x, p.y, o.x, o.y);
-      if (dd > p.reach(o) + 16) continue;
+      if (dd > reach + o.radius) continue;
       var ang = Math.atan2(o.y - p.y, o.x - p.x);
-      if (Math.abs(U.angleDiff(p.face, ang)) > 1.0) continue;
+      if (Math.abs(U.angleDiff(aimAng, ang)) > 1.05) continue;
       var dmg = p.dmg * (0.9 + Math.random() * 0.28);
       var crit = Math.random() < 0.12;
       if (crit) dmg *= 1.85;
@@ -976,6 +1158,13 @@
         this.toast("魔力不足 —— 去魔力水晶或符文圈旁回魔", "bad");
       }
       return;
+    }
+    if (B.kind !== "ring") {
+      var t2 = this.pickAimTarget(B.range * (0.75 + 0.35 * p.scale), 0.85, true);
+      if (t2) {
+        var a2 = Math.atan2(t2.y - p.y, t2.x - p.x);
+        p.face = a2; p.aimAng = a2; p.faceLock = 0.3;
+      }
     }
     D.Magic.cast(this, p);
     this.stats.breaths++;
@@ -1008,6 +1197,7 @@
     var p = this.player;
     if (p.dead) return;
     if (!this.nest) {
+      if (this.underground) { this.toast("地穴里没法筑巢，回地面吧", "bad"); return; }
       if (this.world.isWater(p.x, p.y)) { this.toast("不能在水里筑巢", "bad"); return; }
       if (p.hunger < 45 || p.thirst < 30) { this.toast("太虚弱了，先吃饱喝足再筑巢", "bad"); return; }
       this.nest = { x: p.x, y: p.y };
@@ -1021,7 +1211,24 @@
     }
     var dd = U.dist(p.x, p.y, this.nest.x, this.nest.y);
     if (dd > 100) {
-      this.toast("巢在小地图金色点处（约 " + Math.round(dd / 10) + " 米）", "info");
+      if (this.underground) { this.toast("地穴里没法筑巢", "bad"); return; }
+      if (this.moveNestT > 0) {
+        this.moveNestT = 0;
+        if (this.world.isWater(p.x, p.y)) { this.toast("不能在水里筑巢", "bad"); return; }
+        if (p.hunger < 30) { this.toast("太虚弱了，吃点东西再迁巢", "bad"); return; }
+        this.nest.x = p.x; this.nest.y = p.y;
+        for (var ei = 0; ei < this.eggs.length; ei++) {
+          this.eggs[ei].x = p.x + (Math.random() - 0.5) * 46;
+          this.eggs[ei].y = p.y + (Math.random() - 0.5) * 20;
+        }
+        p.hunger -= 12;
+        this.fx.ring(p.x, p.y, 10, 96, "rgba(255,206,84,0.75)", 0.7);
+        D.Audio.level();
+        this.toast("巢已迁到这里" + (this.eggs.length ? "（蛋也搬过来了）" : ""), "good");
+        return;
+      }
+      this.moveNestT = 3;
+      this.toast("再按一次「迁巢」把巢搬来（原巢在 " + Math.round(dd / 10) + " 米外）", "info");
       return;
     }
     if (this.night > 0.42) { this.sleep(); return; }
@@ -1091,6 +1298,7 @@
   /* ---------------- 回调 ---------------- */
   G.onAttack = function (a, t) {
     if (a.isPlayer || !t || t.dead || t.remove) return;
+    if (t.airborne && t.airborne() && !a.def.flying && !a.def.ranged) return;
     if (U.dist(a.x, a.y, t.x, t.y) > a.reach(t) * 1.3) return;
     var dmg = a.dmg * (0.85 + Math.random() * 0.3);
     t.damage(dmg, a, this);
@@ -1124,6 +1332,7 @@
       if (this.stats.kills === 1) this.unlock("firstKill");
       if (victim.def.apex) this.unlock("apex");
       if (victim.def.kind === "human") this.stats.humans++;
+      if (victim.def.flying) this.unlock("skyhunter");
       if (victim.def.manaDrop) {
         this.player.mana = Math.min(this.player.manaMax, this.player.mana + victim.def.manaDrop);
         this.fx.text(victim.x, victim.y - victim.radius - 34, "+" + victim.def.manaDrop + " 魔力", "#9ff0ff");
@@ -1221,10 +1430,16 @@
     if (e.whoName) e.whoName.textContent = p.def.name;
     if (e.whoStage) e.whoStage.textContent = D.STAGES[p.stage];
     if (e.whoLv) e.whoLv.textContent = "Lv " + p.level;
-    if (e.clock) e.clock.textContent = "第 " + this.day + " 天 " + U.clockText(this.tod);
+    if (e.clock) {
+      e.clock.textContent = (this.underground ? "🕳 地穴 · " : "") + "第 " + this.day + " 天 " + U.clockText(this.tod);
+    }
     if (e.weatherChip) {
-      var ev = this.event === "bloodmoon" ? " · 血月" : this.event === "meteor" ? " · 陨石雨" : "";
-      e.weatherChip.textContent = (this.night > 0.5 ? "🌙 " : "") + this.weather.name + ev;
+      if (this.underground) {
+        e.weatherChip.textContent = "🕳 地下 · 无风";
+      } else {
+        var ev = this.event === "bloodmoon" ? " · 血月" : this.event === "meteor" ? " · 陨石雨" : "";
+        e.weatherChip.textContent = (this.night > 0.5 ? "🌙 " : "") + this.weather.name + ev;
+      }
     }
     var act = this.currentAct;
     if (e.btnAct) {
@@ -1233,9 +1448,10 @@
     }
     if (e.btnNest) {
       var nl = "筑巢";
-      if (this.nest) {
+      if (this.underground) nl = "地穴";
+      else if (this.nest) {
         var dd = U.dist(p.x, p.y, this.nest.x, this.nest.y);
-        nl = dd > 100 ? "巢穴" : (this.night > 0.42 ? "睡觉" : "产蛋");
+        nl = dd > 100 ? "迁巢" : (this.night > 0.42 ? "睡觉" : "产蛋");
       }
       e.btnNest.textContent = nl;
     }
@@ -1280,6 +1496,22 @@
     for (var vv = 0; vv < vs.length; vv++) {
       c.fillStyle = vs[vv].ruined ? "rgba(150,150,150,0.75)" : "#ff9a3a";
       c.fillRect(vs[vv].x * sx - 3, vs[vv].y * sy - 3, 6, 6);
+    }
+    var cvs2 = w.caves || [];
+    for (var cv2 = 0; cv2 < cvs2.length; cv2++) {
+      c.fillStyle = "#20161a";
+      c.fillRect(cvs2[cv2].x * sx - 3, cvs2[cv2].y * sy - 3, 6, 6);
+      c.fillStyle = "#c9a0ff";
+      c.fillRect(cvs2[cv2].x * sx - 1, cvs2[cv2].y * sy - 1, 2, 2);
+    }
+    if (this.inCave) {
+      c.fillStyle = "#eaf7ee";
+      c.fillRect(w.exitX * sx - 3, w.exitY * sy - 3, 6, 6);
+      var als2 = w.altars || [];
+      for (var al2 = 0; al2 < als2.length; al2++) {
+        c.fillStyle = als2[al2].used ? "rgba(160,150,120,0.7)" : "#ffce54";
+        c.fillRect(als2[al2].x * sx - 3, als2[al2].y * sy - 3, 6, 6);
+      }
     }
     var crs = w.crystals || [];
     for (var ci = 0; ci < crs.length; ci++) {
